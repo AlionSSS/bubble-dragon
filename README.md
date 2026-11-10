@@ -3,4 +3,4 @@
 
 
 ## 游戏示例图
-![游戏示例图](docs\images\demo.png)
+![游戏示例图](docs/images/demo.png)
