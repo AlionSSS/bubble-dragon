@@ -1,0 +1,97 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+  background: #cfeaff;
+  color: #24406e;
+  font-family: ui-rounded, "PingFang SC", "Hiragino Sans GB", system-ui, -apple-system,
+    "Segoe UI", Roboto, sans-serif;
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/*
+ * 用 fixed 铺满视口，不依赖 vh/dvh —— 夸克等第三方内核上 dvh 会让整条声明失效。
+ * 实际显示尺寸由 render.js 的 resizeView 计算并写成 px，CSS 只做兜底。
+ */
+#stage {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+    env(safe-area-inset-left);
+}
+
+#game {
+  display: block;
+  width: 400px;
+  height: 640px;
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 14px;
+  background: #d6efff;
+  box-shadow: 0 16px 44px rgba(64, 118, 180, 0.3), 0 0 0 1px rgba(120, 170, 230, 0.4);
+  touch-action: none;
+}
+
+/*
+ * 横屏遮罩：只在「矮屏 + 横向」时出现。
+ * 桌面的 1366x768、1920x1080 高度都超过 560px，不会被误触发；
+ * 手机横屏约 390px 高，会命中。
+ */
+#rotate-hint {
+  display: none;
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 20;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  background: #d6efff;
+  color: #2b4a75;
+  font-size: 15px;
+  letter-spacing: 2px;
+}
+
+#rotate-hint .rotate-icon {
+  width: 44px;
+  height: 64px;
+  border: 2px solid rgba(80, 140, 220, 0.75);
+  border-radius: 8px;
+  animation: rotate-hint 1.8s ease-in-out infinite;
+}
+
+@keyframes rotate-hint {
+  0%,
+  38% {
+    transform: rotate(0deg);
+  }
+  62%,
+  100% {
+    transform: rotate(-90deg);
+  }
+}
+
+@media (orientation: landscape) and (max-height: 560px) {
+  #rotate-hint {
+    display: flex;
+  }
+}
