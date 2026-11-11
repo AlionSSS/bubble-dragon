@@ -13,6 +13,7 @@ import { BubbleType } from './specials.js';
 import { stageProgress } from './stage.js';
 import { IS_LOW_END, MAX_DPR } from './device.js';
 import { drawParticles } from './particles.js';
+import { isMuted } from './audio.js';
 
 const FONT = '"PingFang SC", ui-rounded, system-ui, -apple-system, sans-serif';
 const SPRITE_PAD = 2;
@@ -211,13 +212,17 @@ function createSprite(tint, dpr, type) {
   const rr = R;
 
   /*
-   * 果冻质感 = 顶部高亮 + 底部内侧反光。
-   * 只靠单一径向渐变会像弹珠，加一层从底部透出来的反光才有"凝胶"的通透感。
+   * 水晶球通透质感：
+   * 1. 顶部主高光光源定位在 (-0.32, -0.38)
+   * 2. 中段基色与深邃底色
+   * 3. 底部月牙形菲涅尔反光
+   * 4. 辅助微晶高光点
    */
-  const body = g.createRadialGradient(-rr * 0.3, -rr * 0.4, rr * 0.06, 0, 0, rr);
-  body.addColorStop(0, mix(baseColor, '#ffffff', 0.72));
-  body.addColorStop(0.42, baseColor);
-  body.addColorStop(1, mix(baseColor, '#2b4d72', 0.24));
+  const body = g.createRadialGradient(-rr * 0.32, -rr * 0.38, rr * 0.05, 0, 0, rr);
+  body.addColorStop(0, mix(baseColor, '#ffffff', 0.8));
+  body.addColorStop(0.38, baseColor);
+  body.addColorStop(0.85, mix(baseColor, '#1c385b', 0.28));
+  body.addColorStop(1, mix(baseColor, '#12253e', 0.45));
 
   // clip 之后画的内容都被限制在球内，图标也不会溢出
   g.save();
@@ -228,8 +233,10 @@ function createSprite(tint, dpr, type) {
   g.fillStyle = body;
   g.fillRect(-rr, -rr, rr * 2, rr * 2);
 
-  const rim = g.createRadialGradient(0, rr * 0.66, rr * 0.04, 0, rr * 0.66, rr * 0.9);
-  rim.addColorStop(0, 'rgba(255,255,255,0.4)');
+  // 底部月牙形内侧通透反光（菲涅尔光晕）
+  const rim = g.createRadialGradient(rr * 0.2, rr * 0.6, rr * 0.06, 0, rr * 0.55, rr * 0.95);
+  rim.addColorStop(0, 'rgba(255,255,255,0.48)');
+  rim.addColorStop(0.6, 'rgba(255,255,255,0.18)');
   rim.addColorStop(1, 'rgba(255,255,255,0)');
   g.fillStyle = rim;
   g.fillRect(-rr, -rr, rr * 2, rr * 2);
@@ -237,18 +244,41 @@ function createSprite(tint, dpr, type) {
   if (style) {
     drawIcon(g, type, style.accent);
   } else {
+    // 主高光：柔和倾斜胶囊椭圆
+    const hiGrad = g.createLinearGradient(-rr * 0.5, -rr * 0.55, -rr * 0.1, -rr * 0.15);
+    hiGrad.addColorStop(0, 'rgba(255,255,255,0.92)');
+    hiGrad.addColorStop(1, 'rgba(255,255,255,0.35)');
     g.beginPath();
-    g.ellipse(-rr * 0.3, -rr * 0.36, rr * 0.28, rr * 0.19, -0.6, 0, Math.PI * 2);
-    g.fillStyle = 'rgba(255,255,255,0.72)';
+    g.ellipse(-rr * 0.3, -rr * 0.36, rr * 0.3, rr * 0.18, -0.6, 0, Math.PI * 2);
+    g.fillStyle = hiGrad;
+    g.fill();
+
+    // 次级微晶高光点（立体水珠质感）
+    g.beginPath();
+    g.arc(-rr * 0.08, -rr * 0.48, rr * 0.09, 0, Math.PI * 2);
+    g.fillStyle = 'rgba(255,255,255,0.75)';
+    g.fill();
+
+    // 对角微弱边缘辅光
+    g.beginPath();
+    g.arc(rr * 0.42, rr * 0.42, rr * 0.11, 0, Math.PI * 2);
+    g.fillStyle = 'rgba(255,255,255,0.3)';
     g.fill();
   }
 
   g.restore();
 
+  // 晶莹薄膜外圈高光与柔和微描边
   g.beginPath();
   g.arc(0, 0, rr * 0.985, 0, Math.PI * 2);
-  g.strokeStyle = 'rgba(45,75,115,0.22)';
-  g.lineWidth = 1.3;
+  g.strokeStyle = 'rgba(255,255,255,0.45)';
+  g.lineWidth = 1.2;
+  g.stroke();
+
+  g.beginPath();
+  g.arc(0, 0, rr * 0.985, 0, Math.PI * 2);
+  g.strokeStyle = 'rgba(35,65,105,0.2)';
+  g.lineWidth = 1.0;
   g.stroke();
 
   return { canvas: cv, size };
@@ -308,8 +338,174 @@ export function hitPauseButton(x, y) {
   );
 }
 
+export const MUTE_BTN = { x: LOGICAL_W - 46, y: 14, w: 34, h: 34 };
+
+export function hitMuteButton(x, y) {
+  return (
+    x >= MUTE_BTN.x &&
+    x <= MUTE_BTN.x + MUTE_BTN.w &&
+    y >= MUTE_BTN.y &&
+    y <= MUTE_BTN.y + MUTE_BTN.h
+  );
+}
+
+export function hitSwapButton(x, y) {
+  const cx = SHOOTER_X + R * 3.6;
+  const cy = SHOOTER_Y - 4;
+  return (
+    Math.hypot(x - cx, y - cy) <= 34 ||
+    (Math.abs(x - cx) <= 22 && y >= cy - 24 && y <= cy + 38)
+  );
+}
+
+export function drawMuteButton(view, input, muted, customX, customY) {
+  const { ctx } = view;
+  const bx = customX !== undefined ? customX : MUTE_BTN.x;
+  const by = customY !== undefined ? customY : MUTE_BTN.y;
+  const cx = bx + 17;
+  const cy = by + 17;
+  const hovered =
+    input && input.x >= bx && input.x <= bx + 34 && input.y >= by && input.y <= by + 34;
+
+  ctx.beginPath();
+  ctx.arc(cx, cy, 15, 0, Math.PI * 2);
+  ctx.fillStyle = hovered ? '#4b8fe8' : '#c9e3f9';
+  ctx.fill();
+  ctx.strokeStyle = hovered ? '#3a7ad6' : 'rgba(90,150,215,0.65)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // 扬声器小图标
+  ctx.save();
+  ctx.fillStyle = hovered ? '#ffffff' : '#3a6fae';
+  ctx.strokeStyle = hovered ? '#ffffff' : '#3a6fae';
+  ctx.lineWidth = 1.8;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  ctx.beginPath();
+  ctx.moveTo(cx - 7, cy - 3.5);
+  ctx.lineTo(cx - 4, cy - 3.5);
+  ctx.lineTo(cx, cy - 7);
+  ctx.lineTo(cx, cy + 7);
+  ctx.lineTo(cx - 4, cy + 3.5);
+  ctx.lineTo(cx - 7, cy + 3.5);
+  ctx.closePath();
+  ctx.fill();
+
+  if (muted) {
+    ctx.beginPath();
+    ctx.moveTo(cx + 3, cy - 4.5);
+    ctx.lineTo(cx + 8, cy + 4.5);
+    ctx.moveTo(cx + 8, cy - 4.5);
+    ctx.lineTo(cx + 3, cy + 4.5);
+    ctx.stroke();
+  } else {
+    ctx.beginPath();
+    ctx.arc(cx + 1, cy, 4.5, -Math.PI * 0.3, Math.PI * 0.3);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx + 1, cy, 7.5, -Math.PI * 0.33, Math.PI * 0.33);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+export function drawShockwaves(ctx, shockwaves) {
+  if (!shockwaves || shockwaves.length === 0) return;
+  for (let i = 0; i < shockwaves.length; i++) {
+    const s = shockwaves[i];
+    const k = s.t / s.ttl;
+    if (k >= 1) continue;
+    const alpha = 1 - k;
+    const r = s.r + (s.maxR - s.r) * Math.sin(k * Math.PI * 0.5);
+
+    ctx.save();
+    ctx.globalAlpha = alpha * 0.8;
+    ctx.lineWidth = Math.max(1, (1 - k) * 3.8);
+    ctx.strokeStyle = s.color || '#ffffff';
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // 破裂微光
+    if (k < 0.35) {
+      ctx.globalAlpha = (0.35 - k) * 2;
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r * (1 - k * 2.2), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
+export function createConfetti() {
+  const colors = [
+    '#ea6a74',
+    '#eda45a',
+    '#bccc4f',
+    '#4ec28e',
+    '#4f9fe0',
+    '#9a86d8',
+    '#ff70a6',
+    '#ffd166',
+  ];
+  const list = [];
+  for (let i = 0; i < 50; i++) {
+    const side = Math.random() < 0.5 ? 0 : 1;
+    list.push({
+      x: side === 0 ? Math.random() * 90 : LOGICAL_W - Math.random() * 90,
+      y: 140 + Math.random() * 90,
+      vx: (side === 0 ? 1 : -1) * (50 + Math.random() * 130),
+      vy: -130 - Math.random() * 140,
+      grav: 340 + Math.random() * 180,
+      rot: Math.random() * Math.PI * 2,
+      vrot: (Math.random() - 0.5) * 10,
+      w: 6 + Math.random() * 5,
+      h: 4 + Math.random() * 4,
+      color: colors[(Math.random() * colors.length) | 0],
+      life: 0,
+      ttl: 2.2 + Math.random() * 1.4,
+    });
+  }
+  return list;
+}
+
+export function updateConfetti(list, dt) {
+  for (let i = list.length - 1; i >= 0; i--) {
+    const p = list[i];
+    p.life += dt;
+    if (p.life >= p.ttl) {
+      list.splice(i, 1);
+      continue;
+    }
+    p.vy += p.grav * dt;
+    p.vx *= 1 - 0.7 * dt;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.rot += p.vrot * dt;
+  }
+}
+
+export function drawConfetti(ctx, list) {
+  if (!list || list.length === 0) return;
+  for (let i = 0; i < list.length; i++) {
+    const p = list[i];
+    const k = 1 - p.life / p.ttl;
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, k * 1.6);
+    ctx.translate(p.x, p.y);
+    ctx.rotate(p.rot);
+    ctx.fillStyle = p.color;
+    ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+    ctx.restore();
+  }
+}
+
 const PAUSE_ACTIONS = [
   { id: 'resume', label: '继续游戏' },
+  { id: 'retry', label: '重新开始' },
   { id: 'quit', label: '退出到菜单' },
 ];
 
@@ -317,9 +513,9 @@ export function pauseActions() {
   return PAUSE_ACTIONS.map((a, i) => ({
     ...a,
     x: (LOGICAL_W - 220) / 2,
-    y: 306 + i * 74,
+    y: 266 + i * 62,
     w: 220,
-    h: 58,
+    h: 50,
   }));
 }
 
@@ -368,7 +564,7 @@ export function drawScene(view, state, input) {
   }
 
   drawPlayfield(view, state);
-  drawShooter(view, state);
+  drawShooter(view, state, input);
   drawHud(view, state, input);
   drawBanner(view, state);
 
@@ -409,19 +605,36 @@ function drawMenuDeco(view) {
   }
 }
 
+const DIFF_BADGES = {
+  easy: '🌱 轻松',
+  normal: '⚡ 普通',
+  hard: '🔥 困难',
+  hell: '💀 地狱',
+};
+
 function drawMenu(view, state, input) {
   const { ctx } = view;
 
   drawMenuDeco(view);
+  drawMuteButton(view, input, isMuted());
+
+  const titleBounce = Math.sin(performance.now() / 700) * 3;
+  const titleY = 132 + titleBounce;
 
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.font = `800 42px ${FONT}`;
-  const titleGrad = ctx.createLinearGradient(0, 108, 0, 156);
-  titleGrad.addColorStop(0, '#ff8fb0');
-  titleGrad.addColorStop(1, '#5a9ae8');
+  const titleGrad = ctx.createLinearGradient(0, titleY - 24, 0, titleY + 24);
+  titleGrad.addColorStop(0, '#ff7d9e');
+  titleGrad.addColorStop(0.5, '#5aa0ee');
+  titleGrad.addColorStop(1, '#477ec7');
+
+  // 文字微阴影
+  ctx.fillStyle = 'rgba(70,120,185,0.18)';
+  ctx.fillText('泡泡龙', LOGICAL_W / 2, titleY + 3);
+
   ctx.fillStyle = titleGrad;
-  ctx.fillText('泡泡龙', LOGICAL_W / 2, 132);
+  ctx.fillText('泡泡龙', LOGICAL_W / 2, titleY);
 
   ctx.font = `600 13px ${FONT}`;
   ctx.fillStyle = 'rgba(60,95,140,0.82)';
@@ -452,14 +665,13 @@ function drawMenu(view, state, input) {
 
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
-    ctx.font = `700 21px ${FONT}`;
-    // 难度色只做点缀，标题统一深蓝，避免四行不同颜色把页面搅花
+    ctx.font = `700 20px ${FONT}`;
     ctx.fillStyle = '#24406b';
-    ctx.fillText(diff.name, b.x + 30, b.y + 32);
+    ctx.fillText(DIFF_BADGES[b.key] || diff.name, b.x + 28, b.y + 32);
 
     ctx.font = `500 11px ${FONT}`;
     ctx.fillStyle = hovered ? 'rgba(55,85,130,0.92)' : 'rgba(80,110,155,0.72)';
-    ctx.fillText(diff.tag, b.x + 30, b.y + 52);
+    ctx.fillText(diff.tag, b.x + 28, b.y + 52);
 
     ctx.textAlign = 'right';
     ctx.font = `600 12px ${FONT}`;
@@ -488,6 +700,78 @@ function drawMenu(view, state, input) {
   }
 }
 
+function drawCeiling(ctx, urgent) {
+  const beamY = PLAY_TOP;
+  const beamH = urgent ? 9 : 6;
+
+  if (urgent) {
+    const pulse = 0.72 + 0.28 * Math.sin(performance.now() / 140);
+
+    // 1. 向下投射的危险警示红光（照亮最上方泡泡）
+    ctx.save();
+    const glowH = 34;
+    const warnGlow = ctx.createLinearGradient(0, beamY, 0, beamY + glowH);
+    warnGlow.addColorStop(0, `rgba(255, 45, 75, ${0.48 * pulse})`);
+    warnGlow.addColorStop(1, 'rgba(255, 45, 75, 0)');
+    ctx.fillStyle = warnGlow;
+    ctx.fillRect(0, beamY, LOGICAL_W, glowH);
+    ctx.restore();
+
+    // 2. 警示条基底（深红底色）
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, beamY, LOGICAL_W, beamH);
+    ctx.clip();
+
+    ctx.fillStyle = '#b71c1c';
+    ctx.fillRect(0, beamY, LOGICAL_W, beamH);
+
+    // 3. 动态流动的亮黄色工业警戒斜纹 (// // //)
+    const stripeW = 14;
+    const offset = (performance.now() / 25) % (stripeW * 2);
+    ctx.fillStyle = '#ffea00';
+    ctx.beginPath();
+    for (let sx = -stripeW * 3 + offset; sx < LOGICAL_W + stripeW * 3; sx += stripeW * 2) {
+      ctx.moveTo(sx, beamY + beamH);
+      ctx.lineTo(sx + stripeW * 0.75, beamY + beamH);
+      ctx.lineTo(sx + stripeW * 1.75, beamY);
+      ctx.lineTo(sx + stripeW, beamY);
+      ctx.closePath();
+    }
+    ctx.fill();
+
+    // 4. 警报边框线
+    ctx.strokeStyle = `rgba(255, 230, 80, ${pulse})`;
+    ctx.lineWidth = 1.6;
+    ctx.strokeRect(0, beamY, LOGICAL_W, beamH);
+
+    // 两侧危险警示小红灯（闪烁）
+    const ledFlash = Math.sin(performance.now() / 120) > 0 ? '#ff1744' : '#ff8a80';
+    ctx.fillStyle = ledFlash;
+    ctx.beginPath();
+    ctx.arc(8, beamY + beamH / 2, 2.5, 0, Math.PI * 2);
+    ctx.arc(LOGICAL_W - 8, beamY + beamH / 2, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  } else {
+    // 正常金属滑轨
+    ctx.fillStyle = 'rgba(180, 212, 242, 0.55)';
+    ctx.fillRect(0, beamY, LOGICAL_W, beamH);
+    ctx.strokeStyle = 'rgba(100, 150, 215, 0.6)';
+    ctx.lineWidth = 1.2;
+    ctx.strokeRect(0, beamY, LOGICAL_W, beamH);
+
+    // 金属铆钉
+    ctx.fillStyle = 'rgba(80, 125, 185, 0.55)';
+    for (let rx = 24; rx < LOGICAL_W; rx += 48) {
+      ctx.beginPath();
+      ctx.arc(rx, beamY + beamH / 2, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
 function drawPlayfield(view, state) {
   const { ctx } = view;
   const grid = state.grid;
@@ -512,13 +796,9 @@ function drawPlayfield(view, state) {
   ctx.fillStyle = view.bottomShade;
   ctx.fillRect(0, SHOOTER_Y - R * 2.2, LOGICAL_W, LOGICAL_H - (SHOOTER_Y - R * 2.2));
 
-  const ceiling = grid.ceilingY();
-  ctx.strokeStyle = 'rgba(90,135,200,0.38)';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(0, ceiling);
-  ctx.lineTo(LOGICAL_W, ceiling);
-  ctx.stroke();
+  const gap = state.stage ? state.stage.pushGap : 8;
+  const pushRemain = Math.max(0, Math.ceil(gap - state.shotsSincePush));
+  const urgent = pushRemain <= 2;
 
   // 危险预警：最低的泡泡越接近死线，底部红光越强
   let lowest = 0;
@@ -552,6 +832,8 @@ function drawPlayfield(view, state) {
     drawBubble(view, grid.cellX(col, row), grid.cellY(row), cell.color);
   });
 
+  drawCeiling(ctx, urgent);
+
   for (const p of state.pops) {
     const remain = 1 - p.t / POP_TIME;
     drawBubble(view, p.x, p.y, p.color, Math.max(0, remain), 1 + (1 - remain) * 0.85);
@@ -562,6 +844,7 @@ function drawPlayfield(view, state) {
   }
 
   if (state.particles) drawParticles(ctx, state.particles);
+  if (state.shockwaves) drawShockwaves(ctx, state.shockwaves);
 
   const ball = state.ball;
   if (ball) {
@@ -587,12 +870,12 @@ function drawPlayfield(view, state) {
     ctx.globalAlpha = 1;
   }
 
-  // 连击：弹入 → 停留 → 淡出
+  // 连击：弹性弹入 → 停留 → 淡出
   if (state.combo) {
     const c = state.combo;
-    const enter = Math.min(1, c.t / 0.14);
-    const scale = 0.62 + enter * 0.55;
-    const fade = c.t < 0.62 ? 1 : Math.max(0, 1 - (c.t - 0.62) / 0.38);
+    const enter = Math.min(1, c.t / 0.12);
+    const scale = c.t < 0.12 ? 0.5 + enter * 0.75 : Math.max(1, 1.25 - (c.t - 0.12) * 1.5);
+    const fade = c.t < 0.68 ? 1 : Math.max(0, 1 - (c.t - 0.68) / 0.32);
 
     ctx.save();
     ctx.globalAlpha = fade;
@@ -600,11 +883,15 @@ function drawPlayfield(view, state) {
     ctx.scale(scale, scale);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.font = `800 30px ${FONT}`;
+    ctx.font = `900 32px ${FONT}`;
     ctx.lineWidth = 6;
     ctx.strokeStyle = 'rgba(255,255,255,0.96)';
     ctx.strokeText(c.text, 0, 0);
-    ctx.fillStyle = '#ff9f1a';
+
+    const comboGrad = ctx.createLinearGradient(0, -16, 0, 16);
+    comboGrad.addColorStop(0, '#ffbe3b');
+    comboGrad.addColorStop(1, '#ff6a00');
+    ctx.fillStyle = comboGrad;
     ctx.fillText(c.text, 0, 0);
     ctx.restore();
   }
@@ -631,6 +918,22 @@ function drawAim(view, state) {
   ctx.stroke();
   ctx.restore();
 
+  // 墙面折射点光斑反馈
+  if (path.length > 2) {
+    ctx.save();
+    for (let i = 1; i < path.length - 1; i++) {
+      const pt = path[i];
+      ctx.beginPath();
+      ctx.arc(pt.x, pt.y, 4, 0, Math.PI * 2);
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(75,135,225,0.85)';
+      ctx.lineWidth = 1.8;
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   if (!snap) return;
   const x = state.grid.cellX(snap.col, snap.row);
   const y = state.grid.cellY(snap.row);
@@ -643,13 +946,32 @@ function drawAim(view, state) {
 
   // 轻微呼吸，在满屏泡泡里更容易被一眼找到
   const pulse = 1 + 0.055 * Math.sin(performance.now() / 240);
+  const targetR = R * 0.92 * pulse;
   ctx.beginPath();
-  ctx.arc(x, y, R * 0.92 * pulse, 0, Math.PI * 2);
+  ctx.arc(x, y, targetR, 0, Math.PI * 2);
   ctx.fillStyle = tint ? withAlpha(tint, 0.28) : 'rgba(110,160,235,0.16)';
   ctx.fill();
-  ctx.strokeStyle = 'rgba(75,125,205,0.8)';
-  ctx.lineWidth = 2.5;
+  ctx.strokeStyle = tint ? withAlpha(tint, 0.85) : 'rgba(75,125,205,0.8)';
+  ctx.lineWidth = 2.2;
   ctx.stroke();
+
+  // 目标落点准星指示刻度
+  ctx.save();
+  ctx.strokeStyle = tint ? withAlpha(tint, 0.9) : 'rgba(75,125,205,0.9)';
+  ctx.lineWidth = 1.6;
+  ctx.lineCap = 'round';
+  const markLen = 4;
+  ctx.beginPath();
+  ctx.moveTo(x, y - targetR - markLen);
+  ctx.lineTo(x, y - targetR + 1);
+  ctx.moveTo(x, y + targetR - 1);
+  ctx.lineTo(x, y + targetR + markLen);
+  ctx.moveTo(x - targetR - markLen, y);
+  ctx.lineTo(x - targetR + 1, y);
+  ctx.moveTo(x + targetR - 1, y);
+  ctx.lineTo(x + targetR + markLen, y);
+  ctx.stroke();
+  ctx.restore();
 }
 
 const glowCache = new Map();
@@ -666,13 +988,13 @@ function shooterGlow(ctx, color) {
   return g;
 }
 
-function drawShooter(view, state) {
+function drawShooter(view, state, input) {
   const { ctx } = view;
 
-  // 地面投影：让发射器「坐」在东西上，而不是浮在空白里
+  // 地面投影：让发射器「坐」在地面上，带有微渐变与阴影
   ctx.beginPath();
-  ctx.ellipse(SHOOTER_X, SHOOTER_Y + R * 1.6, R * 1.7, R * 0.4, 0, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(92,142,198,0.26)';
+  ctx.ellipse(SHOOTER_X, SHOOTER_Y + R * 1.5, R * 1.8, R * 0.45, 0, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(70,110,165,0.22)';
   ctx.fill();
 
   // 把当前球的颜色投到底座上：余光就能知道手里是什么球
@@ -682,84 +1004,221 @@ function drawShooter(view, state) {
     : null;
 
   if (tint) {
+    const pulse = 1 + 0.05 * Math.sin(performance.now() / 240);
     ctx.fillStyle = shooterGlow(ctx, tint);
     ctx.beginPath();
-    ctx.arc(SHOOTER_X, SHOOTER_Y, R * 2.7, 0, Math.PI * 2);
+    ctx.arc(SHOOTER_X, SHOOTER_Y, R * 2.7 * pulse, 0, Math.PI * 2);
     ctx.fill();
   }
 
+  // 机械罗盘底座：金属光泽、立体边缘与刻度环
   ctx.beginPath();
-  ctx.arc(SHOOTER_X, SHOOTER_Y, R * 1.46, 0, Math.PI * 2);
-  // 底座也带一点蓝调，避免在蓝底上像一块突兀的白斑
-  ctx.fillStyle = 'rgba(242,251,255,0.92)';
+  ctx.arc(SHOOTER_X, SHOOTER_Y, R * 1.52, 0, Math.PI * 2);
+  const baseGrad = ctx.createLinearGradient(
+    SHOOTER_X - R,
+    SHOOTER_Y - R,
+    SHOOTER_X + R,
+    SHOOTER_Y + R
+  );
+  baseGrad.addColorStop(0, '#fbfdff');
+  baseGrad.addColorStop(0.5, '#e4f0fa');
+  baseGrad.addColorStop(1, '#c8def4');
+  ctx.fillStyle = baseGrad;
   ctx.fill();
-  ctx.strokeStyle = 'rgba(120,165,225,0.55)';
-  ctx.lineWidth = 2;
+  ctx.strokeStyle = 'rgba(100,150,215,0.7)';
+  ctx.lineWidth = 2.2;
   ctx.stroke();
+
+  // 底盘微刻度装饰（罗盘感）
+  ctx.save();
+  ctx.translate(SHOOTER_X, SHOOTER_Y);
+  ctx.strokeStyle = 'rgba(120,165,225,0.6)';
+  ctx.lineWidth = 1.2;
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(a) * R * 1.28, Math.sin(a) * R * 1.28);
+    ctx.lineTo(Math.cos(a) * R * 1.44, Math.sin(a) * R * 1.44);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // 旋转炮管及发射后坐力（Recoil）
+  const recoil = state.recoil || 0;
+  const kick = recoil * 7; // 后坐力沿发射反向退移
 
   ctx.save();
   ctx.translate(SHOOTER_X, SHOOTER_Y);
   ctx.rotate(state.angle);
-  ctx.fillStyle = 'rgba(108,152,222,0.5)';
-  ctx.fillRect(-R * 0.45, -R * 2.35, R * 0.9, R * 1.75);
+
+  // 炮管双导轨
+  const railW = R * 0.28;
+  const railLen = R * 2.35 - kick;
+  const railGap = R * 0.44;
+
+  // 导轨底层连接架
+  ctx.fillStyle = 'rgba(125,170,230,0.5)';
+  ctx.fillRect(-railGap - railW, -railLen * 0.7, (railGap + railW) * 2, railLen * 0.3);
+
+  // 左导轨
+  const railGradLeft = ctx.createLinearGradient(-railGap - railW, 0, -railGap, 0);
+  railGradLeft.addColorStop(0, '#75a9e8');
+  railGradLeft.addColorStop(0.5, '#d8ecff');
+  railGradLeft.addColorStop(1, '#5089d0');
+  ctx.fillStyle = railGradLeft;
+  roundRect(ctx, -railGap - railW, -railLen, railW, railLen * 0.88, 3);
+  ctx.fill();
+
+  // 右导轨
+  const railGradRight = ctx.createLinearGradient(railGap, 0, railGap + railW, 0);
+  railGradRight.addColorStop(0, '#5089d0');
+  railGradRight.addColorStop(0.5, '#d8ecff');
+  railGradRight.addColorStop(1, '#75a9e8');
+  ctx.fillStyle = railGradRight;
+  roundRect(ctx, railGap, -railLen, railW, railLen * 0.88, 3);
+  ctx.fill();
+
+  // 炮口准星三角指针
+  ctx.beginPath();
+  ctx.moveTo(0, -railLen - 4);
+  ctx.lineTo(-4, -railLen + 3);
+  ctx.lineTo(4, -railLen + 3);
+  ctx.closePath();
+  ctx.fillStyle = '#4287dd';
+  ctx.fill();
+
   ctx.restore();
 
+  // 当前发射球（带换球/后坐力微位移）
   if (state.current) {
-    drawBubble(view, SHOOTER_X, SHOOTER_Y, state.current.color, 1, 1, state.current.type);
+    const swapK = state.swapAnim || 0;
+    const curScale = 1 - swapK * 0.2;
+    drawBubble(
+      view,
+      SHOOTER_X,
+      SHOOTER_Y + kick * 0.4,
+      state.current.color,
+      1,
+      curScale,
+      state.current.type
+    );
   }
 
-  // 往右挪开，避开底座的光晕；标签改到球下方，不再和球挤在一起
-  const nx = SHOOTER_X + R * 3.5;
-  const ny = SHOOTER_Y;
+  // 备用球与换球交互台（Swap Pod）
+  const nx = SHOOTER_X + R * 3.6;
+  const ny = SHOOTER_Y - 4;
+  const swapHover =
+    input &&
+    (Math.hypot(input.x - nx, input.y - ny) <= 30 ||
+      (Math.abs(input.x - nx) <= 20 && input.y >= ny - 20 && input.y <= ny + 38));
+
+  // 备用球底托盘
+  ctx.beginPath();
+  ctx.arc(nx, ny, R * 0.98, 0, Math.PI * 2);
+  ctx.fillStyle = swapHover ? 'rgba(235,246,255,0.96)' : 'rgba(238,247,255,0.85)';
+  ctx.fill();
+  ctx.strokeStyle = swapHover ? '#3d82e2' : 'rgba(110,160,225,0.55)';
+  ctx.lineWidth = swapHover ? 2 : 1.5;
+  ctx.stroke();
+
+  // 备用球绘制
+  const nextScale = 0.72 + (state.swapAnim || 0) * 0.15;
   if (state.next) {
-    drawBubble(view, nx, ny, state.next.color, 0.95, 0.72, state.next.type);
+    drawBubble(view, nx, ny, state.next.color, 0.96, nextScale, state.next.type);
   }
 
-  ctx.font = `600 10px ${FONT}`;
+  // 换球图标角标（双向箭头 ⇄）
+  const badgeX = nx + R * 0.78;
+  const badgeY = ny - R * 0.72;
+  ctx.beginPath();
+  ctx.arc(badgeX, badgeY, 8.5, 0, Math.PI * 2);
+  ctx.fillStyle = swapHover ? '#3d82e2' : '#579beb';
+  ctx.fill();
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+
+  // 箭头线条
+  ctx.save();
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 1.3;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(badgeX - 4, badgeY - 2.2);
+  ctx.lineTo(badgeX + 3.2, badgeY - 2.2);
+  ctx.lineTo(badgeX + 1.2, badgeY - 4.2);
+  ctx.moveTo(badgeX + 4, badgeY + 2.2);
+  ctx.lineTo(badgeX - 3.2, badgeY + 2.2);
+  ctx.lineTo(badgeX - 1.2, badgeY + 4.2);
+  ctx.stroke();
+  ctx.restore();
+
+  // 标签胶囊按钮（独立于托盘圆环下方，与球体边界彻底留出间距）
+  const pillY = ny + R * 1.48;
+  const pillW = 40;
+  const pillH = 16;
+  const pillR = 8;
+  roundRect(ctx, nx - pillW / 2, pillY - pillH / 2, pillW, pillH, pillR);
+  ctx.fillStyle = swapHover ? '#3d82e2' : 'rgba(218,238,255,0.92)';
+  ctx.fill();
+  ctx.strokeStyle = swapHover ? '#2c6ec7' : 'rgba(100,150,215,0.5)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  ctx.font = `700 10.5px ${FONT}`;
   ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = 'rgba(52,84,132,0.92)';
-  ctx.fillText('下一个', nx, ny + R * 1.1);
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = swapHover ? '#ffffff' : '#27528e';
+
+  // 计算中文字形真实包围盒，彻底解决 Canvas middle baseline 在中文字符上偏上的排版问题
+  const m = ctx.measureText('换球');
+  const textY =
+    m.actualBoundingBoxAscent !== undefined && m.actualBoundingBoxDescent !== undefined
+      ? pillY + (m.actualBoundingBoxAscent - m.actualBoundingBoxDescent) / 2
+      : pillY + 3.5;
+
+  ctx.fillText('换球', nx, textY);
 }
 
 function drawHud(view, state, input) {
   const { ctx } = view;
   const stage = state.stage;
+  const gap = stage ? stage.pushGap : 8;
+  const remain = Math.max(0, Math.ceil(gap - state.shotsSincePush));
+  const urgent = remain <= 2;
+  const pulse = urgent ? 0.62 + 0.38 * Math.sin(performance.now() / 190) : 1;
 
-  ctx.fillStyle = 'rgba(233,247,255,0.84)';
+  ctx.fillStyle = 'rgba(233,247,255,0.88)';
   ctx.fillRect(0, 0, LOGICAL_W, HUD_H);
-  ctx.strokeStyle = 'rgba(120,160,220,0.28)';
-  ctx.lineWidth = 1;
+  ctx.strokeStyle = urgent
+    ? `rgba(255, 60, 90, ${0.5 + 0.5 * Math.sin(performance.now() / 140)})`
+    : 'rgba(120,160,220,0.32)';
+  ctx.lineWidth = urgent ? 2 : 1;
   ctx.beginPath();
   ctx.moveTo(0, HUD_H - 0.5);
   ctx.lineTo(LOGICAL_W, HUD_H - 0.5);
   ctx.stroke();
 
   drawPauseButton(view, input);
+  drawMuteButton(view, input, isMuted());
 
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
   ctx.font = `600 10px ${FONT}`;
   ctx.fillStyle = 'rgba(70,100,145,0.85)';
-  ctx.fillText('分数', 58, 22);
+  ctx.fillText('分数', 54, 22);
   ctx.font = `700 24px ${FONT}`;
   ctx.fillStyle = '#22406b';
-  ctx.fillText(String(state.score), 58, 47);
-
-  const gap = stage ? stage.pushGap : 8;
-  // 计数已改为浮点（消除只减半推进），显示时向上取整
-  const remain = Math.max(0, Math.ceil(gap - state.shotsSincePush));
-  const urgent = remain <= 2;
-  const pulse = urgent ? 0.62 + 0.38 * Math.sin(performance.now() / 190) : 1;
+  ctx.fillText(String(state.score), 54, 47);
 
   ctx.textAlign = 'right';
   ctx.font = `600 10px ${FONT}`;
-  ctx.fillStyle = urgent ? '#ff9aae' : 'rgba(140,170,215,0.85)';
-  ctx.fillText('距离下压', LOGICAL_W - 16, 22);
+  ctx.fillStyle = urgent ? '#e8557a' : 'rgba(110,145,195,0.85)';
+  ctx.fillText('距离下压', LOGICAL_W - 54, 22);
   ctx.globalAlpha = pulse;
   ctx.font = `700 20px ${FONT}`;
   ctx.fillStyle = urgent ? '#e8557a' : '#22406b';
-  ctx.fillText(`${remain} 发`, LOGICAL_W - 16, 46);
+  ctx.fillText(`${remain} 发`, LOGICAL_W - 54, 46);
   ctx.globalAlpha = 1;
 
   ctx.textAlign = 'center';
@@ -804,21 +1263,37 @@ function drawPauseButton(view, input) {
 function drawPaused(view, state, input) {
   const { ctx } = view;
 
-  ctx.fillStyle = 'rgba(216,238,252,0.95)';
+  ctx.fillStyle = 'rgba(216,238,252,0.92)';
   ctx.fillRect(0, 0, LOGICAL_W, LOGICAL_H);
+
+  // 弹窗卡片浮雕背景
+  const cardW = 276;
+  const cardH = 348;
+  const cardX = (LOGICAL_W - cardW) / 2;
+  const cardY = 148;
+  roundRect(ctx, cardX, cardY + 6, cardW, cardH, 20);
+  ctx.fillStyle = 'rgba(80,125,185,0.18)';
+  ctx.fill();
+
+  roundRect(ctx, cardX, cardY, cardW, cardH, 20);
+  ctx.fillStyle = 'rgba(246,252,255,0.98)';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(120,165,225,0.45)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
 
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.font = `800 30px ${FONT}`;
+  ctx.font = `800 28px ${FONT}`;
   ctx.fillStyle = '#22406b';
-  ctx.fillText('已暂停', LOGICAL_W / 2, 206);
+  ctx.fillText('游戏暂停', LOGICAL_W / 2, cardY + 44);
 
   ctx.font = `600 12px ${FONT}`;
-  ctx.fillStyle = 'rgba(70,100,145,0.8)';
+  ctx.fillStyle = 'rgba(70,100,145,0.85)';
   ctx.fillText(
-    `关卡 ${state.stage ? state.stage.level : 1} · 分数 ${state.score}`,
+    `第 ${state.stage ? state.stage.level : 1} 关 · 当前得分 ${state.score}`,
     LOGICAL_W / 2,
-    244
+    cardY + 74
   );
 
   for (const b of pauseActions()) {
@@ -833,7 +1308,7 @@ function drawPaused(view, state, input) {
         : '#4b8fe8'
       : hovered
         ? 'rgba(214,234,250,1)'
-        : 'rgba(198,222,246,0.95)';
+        : 'rgba(224,240,252,0.92)';
     ctx.fill();
     ctx.strokeStyle = primary ? 'rgba(60,120,200,0.6)' : 'rgba(120,160,215,0.55)';
     ctx.lineWidth = 1.5;
@@ -841,8 +1316,8 @@ function drawPaused(view, state, input) {
 
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.font = `700 18px ${FONT}`;
-    ctx.fillStyle = primary ? '#ffffff' : '#3a5f92';
+    ctx.font = `700 16px ${FONT}`;
+    ctx.fillStyle = primary ? '#ffffff' : '#32588c';
     ctx.fillText(b.label, b.x + b.w / 2, b.y + b.h / 2);
   }
 }
@@ -853,13 +1328,34 @@ function drawBanner(view, state) {
   const t = state.banner.t;
   const alpha = t < 0.18 ? t / 0.18 : Math.max(0, 1 - (t - 0.18) / 1);
 
+  ctx.save();
   ctx.globalAlpha = alpha;
+
+  const bw = 220;
+  const bh = 54;
+  const bx = (LOGICAL_W - bw) / 2;
+  const by = 196;
+
+  roundRect(ctx, bx, by + 4, bw, bh, 16);
+  ctx.fillStyle = 'rgba(60,110,185,0.22)';
+  ctx.fill();
+
+  roundRect(ctx, bx, by, bw, bh, 16);
+  const grad = ctx.createLinearGradient(bx, by, bx + bw, by + bh);
+  grad.addColorStop(0, '#5aa4f8');
+  grad.addColorStop(1, '#3b78dc');
+  ctx.fillStyle = grad;
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.font = `800 32px ${FONT}`;
-  ctx.fillStyle = '#3f7ad0';
-  ctx.fillText(state.banner.text, LOGICAL_W / 2, 210);
-  ctx.globalAlpha = 1;
+  ctx.font = `800 24px ${FONT}`;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(state.banner.text, LOGICAL_W / 2, by + bh / 2);
+  ctx.restore();
 }
 
 function drawGameOver(view, state, input) {
@@ -868,31 +1364,43 @@ function drawGameOver(view, state, input) {
   ctx.fillStyle = 'rgba(216,238,252,0.95)';
   ctx.fillRect(0, 0, LOGICAL_W, LOGICAL_H);
 
+  if (state.confetti) drawConfetti(ctx, state.confetti);
+
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.font = `700 32px ${FONT}`;
   ctx.fillStyle = '#22406b';
-  ctx.fillText('游戏结束', LOGICAL_W / 2, 210);
+  ctx.fillText('游戏结束', LOGICAL_W / 2, 204);
 
   if (state.newRecord) {
     ctx.globalAlpha = 0.72 + 0.28 * Math.sin(performance.now() / 220);
     ctx.font = `800 15px ${FONT}`;
     ctx.fillStyle = '#e8890c';
-    ctx.fillText('新纪录', LOGICAL_W / 2, 250);
+    ctx.fillText('★ 创下新纪录 ★', LOGICAL_W / 2, 244);
     ctx.globalAlpha = 1;
   }
 
   ctx.font = `700 50px ${FONT}`;
   ctx.fillStyle = '#e8890c';
-  ctx.fillText(String(state.score), LOGICAL_W / 2, 296);
+  ctx.fillText(String(state.score), LOGICAL_W / 2, 290);
 
   const diff = state.difficulty;
   ctx.font = `600 12px ${FONT}`;
   ctx.fillStyle = '#24406b';
-  ctx.fillText(`${diff.name} · 第 ${state.stage ? state.stage.level : 1} 关`, LOGICAL_W / 2, 336);
+  ctx.fillText(`${diff.name} · 第 ${state.stage ? state.stage.level : 1} 关`, LOGICAL_W / 2, 332);
 
   ctx.fillStyle = 'rgba(70,100,145,0.85)';
-  ctx.fillText(`最高分 ${state.bests[diff.key] || 0}`, LOGICAL_W / 2, 360);
+  ctx.fillText(`最高分 ${state.bests[diff.key] || 0}`, LOGICAL_W / 2, 354);
+
+  if (state.statsPopped) {
+    ctx.font = `500 11px ${FONT}`;
+    ctx.fillStyle = 'rgba(80,120,175,0.78)';
+    ctx.fillText(
+      `消除 ${state.statsPopped} 颗 · 最大连击 ×${state.statsMaxCombo || 1}`,
+      LOGICAL_W / 2,
+      376
+    );
+  }
 
   for (const b of gameOverActions()) {
     const primary = b.id === 'retry';

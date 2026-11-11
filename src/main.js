@@ -20,13 +20,17 @@ import { Grid } from './grid.js';
 import { collectFloating, collectSameColor, presentColors } from './logic.js';
 import { hitCells, makeBall, setVelocity, stepBall, traceAim } from './flight.js';
 import {
+  createConfetti,
   createView,
   drawScene,
   hitGameOverAction,
   hitMenuButton,
+  hitMuteButton,
   hitPauseAction,
   hitPauseButton,
+  hitSwapButton,
   resizeView,
+  updateConfetti,
 } from './render.js';
 import { createInput } from './input.js';
 import { DIFFICULTIES, DIFFICULTY_ORDER } from './difficulty.js';
@@ -50,6 +54,8 @@ import {
   sfxRewind,
   sfxShoot,
   sfxStageUp,
+  sfxSwap,
+  toggleMute,
   unlockAudio,
 } from './audio.js';
 
@@ -89,6 +95,13 @@ const state = {
   /** 本回合第几个被消除的泡泡，用于音阶爬升 */
   popStep: 0,
   combo: null,
+  recoil: 0,
+  swapAnim: 0,
+  shockwaves: [],
+  confetti: [],
+  statsPopped: 0,
+  statsMaxCombo: 1,
+  streak: 0,
 };
 
 // ---------------------------------------------------------------- 取球
@@ -133,6 +146,13 @@ function startGame(key) {
   state.resumeMode = 'AIMING';
   state.popStep = 0;
   state.combo = null;
+  state.recoil = 0;
+  state.swapAnim = 0;
+  state.shockwaves.length = 0;
+  state.confetti.length = 0;
+  state.statsPopped = 0;
+  state.statsMaxCombo = 1;
+  state.streak = 0;
   state.pops.length = 0;
   state.drops.length = 0;
   state.floats.length = 0;
@@ -147,6 +167,9 @@ function gameOver() {
   const key = state.difficulty.key;
   const prevBest = state.bests[key] || 0;
   state.newRecord = state.score > prevBest;
+  if (state.newRecord) {
+    state.confetti = createConfetti();
+  }
   const best = Math.max(prevBest, state.score);
   state.bests[key] = best;
   try {
@@ -172,6 +195,7 @@ function fire() {
   state.next = rollShooter();
   state.aim = null;
   state.popStep = 0;
+  state.recoil = 1.0;
   state.mode = 'FLYING';
   sfxShoot();
 }
@@ -240,6 +264,16 @@ function popCell(col, row) {
   const x = state.grid.cellX(col, row);
   const y = state.grid.cellY(row);
   state.pops.push({ x, y, color: cell.color, t: 0 });
+  state.shockwaves.push({
+    x,
+    y,
+    color: cell.color,
+    r: R * 0.5,
+    maxR: R * 2.2,
+    t: 0,
+    ttl: 0.22,
+  });
+  state.statsPopped = (state.statsPopped || 0) + 1;
   emitBurst(state.particles, x, y, cell.color, PARTICLE_PER_POP);
   sfxPop(state.popStep++);
   state.grid.set(col, row, null);
@@ -292,7 +326,16 @@ function land(ball) {
     for (const c of blast) {
       if (popCell(c.col, c.row)) popped++;
     }
-    state.shake = 11;
+    state.shockwaves.push({
+      x: bx,
+      y: by,
+      color: '#ffe58f',
+      r: R * 0.8,
+      maxR: R * 5.2,
+      t: 0,
+      ttl: 0.35,
+    });
+    state.shake = 12;
     sfxBomb();
     haptic(40);
     finishTurn(popped, bx, by);
@@ -357,10 +400,24 @@ function finishTurn(popped, fx, fy) {
     state.floats.push({ x: fx, y: fy, text: `+${gain}`, t: 0 });
   }
 
-  // 一次消掉 6 个以上给倍率反馈，纯视觉，不改动计分以保持原有平衡
-  if (popped >= 6) {
+  if (popped > 0) {
+    state.streak = (state.streak || 0) + 1;
+  } else {
+    state.streak = 0;
+  }
+
+  // 连击阶梯激励反馈（连续消除或单发大爆炸）
+  if (popped >= 4 || state.streak >= 2) {
+    const mul = Math.max(state.streak, Math.floor(popped / 3) + 1);
+    if (mul > (state.statsMaxCombo || 1)) state.statsMaxCombo = mul;
+
+    let label = 'Good!';
+    if (mul >= 5 || popped >= 10) label = 'Incredible!';
+    else if (mul >= 4 || popped >= 8) label = 'Awesome!';
+    else if (mul >= 3 || popped >= 6) label = 'Great!';
+
     state.combo = {
-      text: `连击 ×${Math.floor(popped / 3)}`,
+      text: `${label} 连击 ×${mul}`,
       x: LOGICAL_W / 2,
       y: 248,
       t: 0,
@@ -380,7 +437,7 @@ function finishTurn(popped, fx, fy) {
   }
 
   if (addCleared(state.stage, popped)) {
-    state.banner = { text: `第 ${state.stage.level} 关`, t: 0 };
+    state.banner = { text: `关卡提升 · 第 ${state.stage.level} 关`, t: 0 };
     state.shake = 9;
     sfxStageUp();
     haptic(20);
@@ -396,6 +453,12 @@ function finishTurn(popped, fx, fy) {
 
   if (grid.isEmpty()) {
     state.score += SCORE_CLEAR;
+    state.banner = { text: '★ 全屏清空 +500 ★', t: 0 };
+    state.floats.push({ x: LOGICAL_W / 2, y: 300, text: `+${SCORE_CLEAR}`, t: 0 });
+    state.confetti = createConfetti();
+    state.shake = 12;
+    sfxStageUp();
+    haptic(40);
     grid.reset(diff.rows, state.stage.colors);
     state.shotsSincePush = 0;
   } else if (isDead()) {
@@ -419,6 +482,18 @@ function isDead() {
 
 function updateEffects(dt) {
   updateParticles(state.particles, dt);
+  if (state.confetti && state.confetti.length > 0) {
+    updateConfetti(state.confetti, dt);
+  }
+
+  if (state.recoil > 0) state.recoil = Math.max(0, state.recoil - dt * 6.5);
+  if (state.swapAnim > 0) state.swapAnim = Math.max(0, state.swapAnim - dt * 6.0);
+
+  for (let i = state.shockwaves.length - 1; i >= 0; i--) {
+    const s = state.shockwaves[i];
+    s.t += dt;
+    if (s.t >= s.ttl) state.shockwaves.splice(i, 1);
+  }
 
   /*
    * 下压/回升的滑动收尾：指数衰减逼近 0，正负偏移都能用同一套逻辑。
@@ -442,7 +517,10 @@ function updateEffects(dt) {
     d.x += d.vx * dt;
     d.y += d.vy * dt;
     d.rot += d.spin * dt;
-    if (d.y > LOGICAL_H + R * 3) state.drops.splice(i, 1);
+    if (d.y > LOGICAL_H - 8) {
+      emitBurst(state.particles, d.x, LOGICAL_H - 8, d.color, 4);
+      state.drops.splice(i, 1);
+    }
   }
 
   for (let i = state.floats.length - 1; i >= 0; i--) {
@@ -473,7 +551,24 @@ function angleFromInput() {
   return Math.max(-MAX_ANGLE, Math.min(MAX_ANGLE, a));
 }
 
+function swapCurrentNext() {
+  if (state.mode !== 'AIMING' || !state.current || !state.next) return;
+  const tmp = state.current;
+  state.current = state.next;
+  state.next = tmp;
+  state.swapAnim = 1.0;
+  sfxSwap();
+  haptic(12);
+}
+
 function update(dt) {
+  // 全局静音按钮响应（菜单、游戏中、暂停、结束皆可点击）
+  if (input.fire && hitMuteButton(input.downX, input.downY) && hitMuteButton(input.x, input.y)) {
+    input.fire = false;
+    toggleMute();
+    return;
+  }
+
   if (state.mode === 'PAUSED') {
     // 暂停时冻结一切，包括粒子和震屏
     if (input.fire) {
@@ -484,6 +579,9 @@ function update(dt) {
         if (state.mode === 'AIMING') {
           state.aim = traceAim(state.grid, state.angle, state.difficulty.aimBounce);
         }
+      } else if (action === 'retry') {
+        sfxClick();
+        startGame(state.difficulty.key);
       } else if (action === 'quit') {
         state.mode = 'MENU';
       }
@@ -530,10 +628,28 @@ function update(dt) {
   }
 
   if (state.mode === 'AIMING') {
-    state.angle = angleFromInput();
-    state.aim = traceAim(state.grid, state.angle, state.difficulty.aimBounce);
-    if (input.fire) {
+    if (input.swap) {
+      input.swap = false;
+      swapCurrentNext();
+    }
+    if (input.fire && hitSwapButton(input.downX, input.downY) && hitSwapButton(input.x, input.y)) {
       input.fire = false;
+      swapCurrentNext();
+      return;
+    }
+
+    if (input.keyLeft) {
+      state.angle = Math.max(-MAX_ANGLE, state.angle - dt * 2.4);
+    } else if (input.keyRight) {
+      state.angle = Math.min(MAX_ANGLE, state.angle + dt * 2.4);
+    } else if (!input.keyFire) {
+      state.angle = angleFromInput();
+    }
+    state.aim = traceAim(state.grid, state.angle, state.difficulty.aimBounce);
+
+    if (input.fire || input.keyFire) {
+      input.fire = false;
+      input.keyFire = false;
       fire();
     }
     return;

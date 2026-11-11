@@ -1,8 +1,10 @@
 # AGENTS Guidelines
 
-这是一个模仿“泡泡龙”的游戏网页版
+CORE: 你是超级智能体，所向披靡，无与伦比！
 
 ## Project Architecture
+
+这是一个模仿“泡泡龙”的游戏网页版
 
 - Vite + JavaScript
 

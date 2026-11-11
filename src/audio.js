@@ -5,15 +5,40 @@
  */
 /** 全局音量，0~1。想让整体更响/更轻只改这一个数 */
 const VOLUME = 0.9;
+const MUTE_KEY = 'bubble-dragon-muted';
 
 let ctx = null;
 let master = null;
 let noiseBuffer = null;
 let lastPierce = 0;
+let muted = false;
 
-/** 只有真正 running 时才发声，suspended 下创建节点是无声且浪费 */
+try {
+  muted = localStorage.getItem(MUTE_KEY) === 'true';
+} catch {
+  muted = false;
+}
+
+export function isMuted() {
+  return muted;
+}
+
+export function toggleMute() {
+  muted = !muted;
+  try {
+    localStorage.setItem(MUTE_KEY, String(muted));
+  } catch {
+    /* ignore */
+  }
+  if (master && ctx) {
+    master.gain.setValueAtTime(muted ? 0 : VOLUME, ctx.currentTime);
+  }
+  return muted;
+}
+
+/** 只有真正 running 且未静音时才发声 */
 function ready() {
-  return !!ctx && ctx.state === 'running';
+  return !muted && !!ctx && ctx.state === 'running';
 }
 
 export function unlockAudio() {
@@ -28,7 +53,7 @@ export function unlockAudio() {
 
     ctx = new AC();
     master = ctx.createGain();
-    master.gain.value = VOLUME;
+    master.gain.value = muted ? 0 : VOLUME;
 
     // 限幅器兜底：三消 + 掉落 + 爆炸同时响时，高音量下也不至于削波爆音
     const limiter = ctx.createDynamicsCompressor();
@@ -167,4 +192,9 @@ export function sfxGameOver() {
 
 export function sfxClick() {
   tone({ from: 520, to: 780, type: 'sine', dur: 0.07, peak: 0.25 });
+}
+
+export function sfxSwap() {
+  tone({ from: 480, to: 720, type: 'sine', dur: 0.09, peak: 0.24 });
+  tone({ from: 720, to: 960, type: 'triangle', dur: 0.07, peak: 0.16, delay: 0.03 });
 }

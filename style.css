@@ -8,7 +8,7 @@ html,
 body {
   height: 100%;
   overflow: hidden;
-  background: #cfeaff;
+  background: radial-gradient(circle at 50% 30%, #e3f3ff 0%, #cae5fc 60%, #b8daf8 100%);
   color: #24406e;
   font-family: ui-rounded, "PingFang SC", "Hiragino Sans GB", system-ui, -apple-system,
     "Segoe UI", Roboto, sans-serif;

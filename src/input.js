@@ -16,6 +16,10 @@ export function createInput(view) {
     downY: SHOOTER_Y - 220,
     dragging: false,
     fire: false,
+    swap: false,
+    keyLeft: false,
+    keyRight: false,
+    keyFire: false,
   };
 
   function toLogical(e) {
@@ -29,6 +33,12 @@ export function createInput(view) {
   }
 
   canvas.addEventListener('pointerdown', (e) => {
+    if (e.button === 2) {
+      // 鼠标右键：快速换球
+      e.preventDefault();
+      input.swap = true;
+      return;
+    }
     if (e.button !== undefined && e.button !== 0) return;
     const p = toLogical(e);
     input.x = p.x;
@@ -69,6 +79,38 @@ export function createInput(view) {
     input.dragging = false;
   });
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  window.addEventListener('keydown', (e) => {
+    if (
+      e.code === 'Tab' ||
+      e.code === 'Space' ||
+      e.code === 'KeyC' ||
+      e.code === 'ArrowDown' ||
+      e.code === 'KeyS'
+    ) {
+      e.preventDefault();
+      input.swap = true;
+      return;
+    }
+    if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+      input.keyLeft = true;
+    } else if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+      input.keyRight = true;
+    } else if (e.code === 'Enter' || e.code === 'ArrowUp' || e.code === 'KeyW') {
+      e.preventDefault();
+      input.keyFire = true;
+    }
+  });
+
+  window.addEventListener('keyup', (e) => {
+    if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+      input.keyLeft = false;
+    } else if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+      input.keyRight = false;
+    } else if (e.code === 'Enter' || e.code === 'ArrowUp' || e.code === 'KeyW') {
+      input.keyFire = false;
+    }
+  });
 
   return input;
 }
